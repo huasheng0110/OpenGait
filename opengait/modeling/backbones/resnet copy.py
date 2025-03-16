@@ -56,8 +56,8 @@ class ResNet9(ResNet):
             x = self.maxpool(x)
 
         x = self.layer1(x)
-        x_later2 = self.layer2(x) # 保存layer2的输出
-        B_T, C, W, H = x_later2.shape
+        x_layer2 = self.layer2(x) # 保存layer2的输出
+        B_T, C, W, H = x_layer2.shape
         B = B_T // 30  # T=30
         T = 30
         x_t = x_layer2.view(B, T, C, W, H)
