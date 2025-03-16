@@ -1,4 +1,17 @@
+"""
+main.py文件主要是核心目的是 根据用户指令和配置文件，自动化地启动训练或测试流程。它通过解析命令行参数、加载配置、初始化环境和模型，最终运行训练或测试任务。
+这种设计使得用户可以灵活地控制程序的行为，而无需修改代码本身。
+举例：python main.py --cfgs config/my_config.yaml --phase train --log_to_file
+程序会：
+解析命令行参数：
+使用 config/my_config.yaml 作为配置文件。
+进入训练模式（train）。
+将日志保存到文件。
+加载 config/my_config.yaml 中的配置。
+初始化分布式训练环境和日志管理器。
+根据配置文件中的设置启动训练过程。
 
+"""
 import os
 import argparse
 import torch
