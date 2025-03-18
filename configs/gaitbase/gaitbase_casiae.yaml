@@ -1,6 +1,6 @@
 data_cfg:
   dataset_name: CASIA-E
-  dataset_root: /root/autodl-tmp/CASIA-B-pkl  # 我的路径
+  dataset_root: your_path  # 我的路径
   dataset_partition: ./datasets/CASIA-E/CASIA-E.json
   num_workers: 1
   remove_no_gallery: false # Remove probe if no gallery for it
