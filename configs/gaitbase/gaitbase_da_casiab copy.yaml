@@ -35,7 +35,7 @@ model_cfg:
   model: Baseline
   backbone_cfg:
     type: ResNet9
-    block: BasicBlock     # 这里改用设置的3d卷积块 BasicBlock3D
+    block: BasicBlock3D     # 这里改用设置的3d卷积块 BasicBlock3D
     channels: # Layers configuration for automatically model construction
       - 64
       - 128
@@ -48,8 +48,8 @@ model_cfg:
       - 1
     strides:
       - 1
-      - 2
-      - 2
+      - [2,2,2]  # 时间T+空间维度下采样
+      - [2,2,2]  # 时间T+空间维度下采样
       - 1
     maxpool: false
   SeparateFCs:

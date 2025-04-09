@@ -32,21 +32,43 @@ class HorizontalPoolingPyramid():
         return torch.cat(features, -1)
 
 
+# class SetBlockWrapper(nn.Module):
+#     def __init__(self, forward_block):
+#         super(SetBlockWrapper, self).__init__()
+#         self.forward_block = forward_block
+
+#     def forward(self, x, *args, **kwargs):
+#         """
+#             In  x: [n, c_in, s, h_in, w_in]
+#             Out x: [n, c_out, s, h_out, w_out]
+#         """
+#         n, c, s, h, w = x.size()
+#         x = self.forward_block(x.transpose(
+#             1, 2).reshape(-1, c, h, w), *args, **kwargs)
+#         output_size = x.size()
+#         return x.reshape(n, s, *output_size[1:]).transpose(1, 2).contiguous()
+
 class SetBlockWrapper(nn.Module):
-    def __init__(self, forward_block):
+    def __init__(self, forward_block, is_3d=False):
         super(SetBlockWrapper, self).__init__()
         self.forward_block = forward_block
+        self.is_3d = is_3d
 
     def forward(self, x, *args, **kwargs):
         """
-            In  x: [n, c_in, s, h_in, w_in]
-            Out x: [n, c_out, s, h_out, w_out]
+        x: [B, C, T, H, W]
+        - For 2D block: reshape to [B*T, C, H, W], run forward, reshape back
+        - For 3D block: run directly
         """
-        n, c, s, h, w = x.size()
-        x = self.forward_block(x.transpose(
-            1, 2).reshape(-1, c, h, w), *args, **kwargs)
-        output_size = x.size()
-        return x.reshape(n, s, *output_size[1:]).transpose(1, 2).contiguous()
+        if self.is_3d:
+            return self.forward_block(x, *args, **kwargs)
+        else:
+            B, C, T, H, W = x.shape
+            x = x.transpose(1, 2).reshape(B * T, C, H, W)
+            x = self.forward_block(x, *args, **kwargs)
+            C_out, H_out, W_out = x.shape[1:]
+            return x.reshape(B, T, C_out, H_out, W_out).transpose(1, 2).contiguous()
+
 
 
 class PackSequenceWrapper(nn.Module):

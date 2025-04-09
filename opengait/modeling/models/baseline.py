@@ -9,7 +9,10 @@ class Baseline(BaseModel):
 
     def build_network(self, model_cfg):
         self.Backbone = self.get_backbone(model_cfg['backbone_cfg'])
-        self.Backbone = SetBlockWrapper(self.Backbone)
+        # 采用2d，3d混合的backbone，block为BasicBlock3D
+        is_3d_backbone = model_cfg['backbone_cfg']['block'] == 'BasicBlock3D'
+        self.Backbone = SetBlockWrapper(self.Backbone, is_3d=is_3d_backbone)
+        # self.Backbone = SetBlockWrapper(self.Backbone)
         self.FCs = SeparateFCs(**model_cfg['SeparateFCs'])
         self.BNNecks = SeparateBNNecks(**model_cfg['SeparateBNNecks'])
         self.TP = PackSequenceWrapper(torch.max)
