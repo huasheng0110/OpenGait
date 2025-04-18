@@ -29,6 +29,17 @@ class Baseline(BaseModel):
 
         del ipts
         outs = self.Backbone(sils)  # [n, c, s, h, w]
+        # 添加补丁，针对不固定帧数能够实现降维
+        T_out = outs.shape[2]
+
+        # ✅ 防止训练阶段为 None 时出错
+        if seqL is not None:
+            if isinstance(seqL, torch.Tensor):
+                seqL = torch.clamp(seqL, max=T_out)
+            elif isinstance(seqL, list):
+                seqL = [min(s, T_out) for s in seqL]
+                seqL = torch.tensor([seqL], device=outs.device)
+
 
         # Temporal Pooling, TP
         outs = self.TP(outs, seqL, options={"dim": 2})[0]  # [n, c, h, w]
