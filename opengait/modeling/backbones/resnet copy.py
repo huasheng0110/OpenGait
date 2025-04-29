@@ -2,7 +2,7 @@ from torch.nn import functional as F
 import torch.nn as nn
 from torchvision.models.resnet import BasicBlock, Bottleneck, ResNet
 from ..modules import BasicConv2d
-from ..modules import DynamicFeatureBranch, FeatureFusion
+from ..modules import DynamicFeatureBranch, FeatureFusion,ProgressiveFusionBranch
 from ..BasicBlock3D import BasicBlock3D
 from ..BasicBlockP3D import BasicBlockP3D
 
@@ -203,8 +203,17 @@ class ResNet9_P3D(nn.Module):
         self.block4_conv = self.layer4[0].conv2d
 
 
-        self.dynamic_branch = DynamicFeatureBranch(self.block2_conv, self.block3_conv, self.block4_conv)
-        self.feature_fusion = FeatureFusion(in_channels=channels[3]*2, out_channels=channels[3])
+        # self.dynamic_branch = DynamicFeatureBranch(self.block2_conv, self.block3_conv, self.block4_conv)
+        # self.feature_fusion = FeatureFusion(in_channels=channels[3]*2, out_channels=channels[3])
+        self.dynamic_branch = ProgressiveFusionBranch(
+            conv2=self.layer2[0].conv2d,
+            conv3=self.layer3[0].conv2d,
+            conv4=self.layer4[0].conv2d,
+            fuse2=FeatureFusion(128, 128, 128),
+            fuse3=FeatureFusion(256, 256, 256),
+            fuse4=FeatureFusion(512, 512, 512)
+        )
+
 
     def _make_layer(self, block, planes, blocks, stride, norm_layer):
          # 🧠 自动适配 stride 类型
@@ -230,16 +239,28 @@ class ResNet9_P3D(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x):  # x: [B, C, T, H, W]
+    # def forward(self, x):  # x: [B, C, T, H, W]
+    #     x = self.relu(self.bn1(self.conv1(x)))
+    #     x = self.layer1(x)
+    #     # 动态分支从这里开始提取
+    #     x_dyn = self.dynamic_branch(x)
+
+    #     x = self.layer2(x)
+    #     x = self.layer3(x)
+    #     x = self.layer4(x)
+
+    #     # 融合主干与分支特征
+    #     x = self.feature_fusion(x, x_dyn)
+    #     return x
+    def forward(self, x):
         x = self.relu(self.bn1(self.conv1(x)))
-        x = self.layer1(x)
-        # 动态分支从这里开始提取
-        x_dyn = self.dynamic_branch(x)
 
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+        x1 = self.layer1(x)
+        x2 = self.layer2(x1)
+        x3 = self.layer3(x2)
+        x4 = self.layer4(x3)
 
-        # 融合主干与分支特征
-        x = self.feature_fusion(x, x_dyn)
-        return x
+        # 🎯 使用逐层融合分支模块
+        x_out = self.dynamic_branch(x1, x2, x3, x4)
+
+        return x_out

@@ -921,25 +921,76 @@ class DynamicFeatureBranch(nn.Module):
 
         return x
 
+''' 重构分支模块 '''
+class ProgressiveFusionBranch(nn.Module):
+    def __init__(self, conv2, conv3, conv4, fuse2, fuse3, fuse4):
+        super().__init__()
+        self.conv2 = conv2
+        self.conv3 = conv3
+        self.conv4 = conv4
+        self.fuse2 = fuse2
+        self.fuse3 = fuse3
+        self.fuse4 = fuse4
+
+    def forward(self, x_stage1, layer2_block, layer3_block, layer4_block):
+        # 分支 stage 1：差分 + 卷积
+        x_dyn2 = pairwise_temporal_diff(x_stage1)
+        x_dyn2 = self.conv2(x_dyn2)
+
+        # 融合分支输出和主干 Layer2 输出，作为 Layer3 输入
+        x_fused2 = self.fuse2(layer2_block, x_dyn2)
+
+        # 分支 stage 2：差分 + 卷积
+        x_dyn3 = pairwise_temporal_diff(x_fused2)
+        x_dyn3 = self.conv3(x_dyn3)
+
+        # 融合分支输出和主干 Layer3 输出，作为 Layer4 输入
+        x_fused3 = self.fuse3(layer3_block, x_dyn3)
+
+        # 分支 stage 3：不差分，直接卷积
+        x_dyn4 = self.conv4(x_fused3)
+
+        # 最终融合：与 Layer4 输出融合作为模型输出
+        x_fused4 = self.fuse4(layer4_block, x_dyn4)
+
+        return x_fused4
+
+
+
+# class FeatureFusion(nn.Module):
+#     def __init__(self, in_channels, out_channels):
+#         super().__init__()
+#         self.fuse = nn.Conv3d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
+#         self.bn = nn.BatchNorm3d(out_channels)
+#         self.relu = nn.ReLU(inplace=True)
+
+#     def forward(self, x_main, x_dyn):
+#         # 对齐时间维（T），以便拼接
+#         T_main = x_main.shape[2]
+#         T_dyn = x_dyn.shape[2]
+
+#         if T_main > T_dyn:
+#             x_main = x_main[:, :, :T_dyn, :, :]  # 裁剪主干 T
+#         elif T_main < T_dyn:
+#             x_dyn = x_dyn[:, :, :T_main, :, :]  # 裁剪分支 T
+
+#         x = torch.cat([x_main, x_dyn], dim=1)  # [B, C1+C2, T, H, W]
+#         x = self.relu(self.bn(self.fuse(x)))
+# #         print('特征融合后的特征大小：',x.shape)
+#         return x
 
 class FeatureFusion(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in1, in2, out):
         super().__init__()
-        self.fuse = nn.Conv3d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-        self.bn = nn.BatchNorm3d(out_channels)
+        self.fuse = nn.Conv3d(in1 + in2, out, kernel_size=1)
+        self.bn = nn.BatchNorm3d(out)
         self.relu = nn.ReLU(inplace=True)
 
-    def forward(self, x_main, x_dyn):
-        # 对齐时间维（T），以便拼接
-        T_main = x_main.shape[2]
-        T_dyn = x_dyn.shape[2]
-
-        if T_main > T_dyn:
-            x_main = x_main[:, :, :T_dyn, :, :]  # 裁剪主干 T
-        elif T_main < T_dyn:
-            x_dyn = x_dyn[:, :, :T_main, :, :]  # 裁剪分支 T
-
-        x = torch.cat([x_main, x_dyn], dim=1)  # [B, C1+C2, T, H, W]
-        x = self.relu(self.bn(self.fuse(x)))
-#         print('特征融合后的特征大小：',x.shape)
-        return x
+    def forward(self, x1, x2):
+        T1, T2 = x1.shape[2], x2.shape[2]
+        if T1 > T2:
+            x1 = x1[:, :, :T2]
+        elif T2 > T1:
+            x2 = x2[:, :, :T1]
+        x = torch.cat([x1, x2], dim=1)
+        return self.relu(self.bn(self.fuse(x)))
