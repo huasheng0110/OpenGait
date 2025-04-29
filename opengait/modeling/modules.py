@@ -61,6 +61,7 @@ class SetBlockWrapper(nn.Module):
         - For 3D block: run directly
         """
         if self.is_3d:
+#             print("特征图特征大小",x.shape)
             return self.forward_block(x, *args, **kwargs)
         else:
             B, C, T, H, W = x.shape
@@ -68,7 +69,6 @@ class SetBlockWrapper(nn.Module):
             x = self.forward_block(x, *args, **kwargs)
             C_out, H_out, W_out = x.shape[1:]
             return x.reshape(B, T, C_out, H_out, W_out).transpose(1, 2).contiguous()
-
 
 
 class PackSequenceWrapper(nn.Module):

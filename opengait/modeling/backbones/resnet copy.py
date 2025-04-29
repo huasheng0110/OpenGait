@@ -12,8 +12,7 @@ block_map = {
     'BasicBlock': BasicBlock,
     'Bottleneck': Bottleneck
 }
-if isinstance(block, str):
-    block = block_map[block]
+
 
 class ResNet9(ResNet):
     def __init__(self, block, channels=[32, 64, 128, 256], in_channel=1, layers=[1, 2, 2, 1], strides=[1, 2, 2, 1], maxpool=True):
