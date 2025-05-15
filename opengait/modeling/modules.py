@@ -922,38 +922,38 @@ class DynamicFeatureBranch(nn.Module):
         return x
 
 ''' 重构分支模块 '''
-class ProgressiveFusionBranch(nn.Module):
-    def __init__(self, conv2, conv3, conv4, fuse2, fuse3, fuse4):
-        super().__init__()
-        self.conv2 = conv2
-        self.conv3 = conv3
-        self.conv4 = conv4
-        self.fuse2 = fuse2
-        self.fuse3 = fuse3
-        self.fuse4 = fuse4
+# class ProgressiveFusionBranch(nn.Module):
+#     def __init__(self, conv2, conv3, conv4, fuse2, fuse3, fuse4):
+#         super().__init__()
+#         self.conv2 = conv2
+#         self.conv3 = conv3
+#         self.conv4 = conv4
+#         self.fuse2 = fuse2
+#         self.fuse3 = fuse3
+#         self.fuse4 = fuse4
 
-    def forward(self, x_stage1, layer2_block, layer3_block, layer4_block):
-        # 分支 stage 1：差分 + 卷积
-        x_dyn2 = pairwise_temporal_diff(x_stage1)
-        x_dyn2 = self.conv2(x_dyn2)
+#     def forward(self, x_stage1, layer2_block, layer3_block, layer4_block):
+#         # 分支 stage 1：差分 + 卷积
+#         x_dyn2 = pairwise_temporal_diff(x_stage1)
+#         x_dyn2 = self.conv2(x_dyn2)
 
-        # 融合分支输出和主干 Layer2 输出，作为 Layer3 输入
-        x_fused2 = self.fuse2(layer2_block, x_dyn2)
+#         # 融合分支输出和主干 Layer2 输出，作为 Layer3 输入
+#         x_fused2 = self.fuse2(layer2_block, x_dyn2)
 
-        # 分支 stage 2：差分 + 卷积
-        x_dyn3 = pairwise_temporal_diff(x_fused2)
-        x_dyn3 = self.conv3(x_dyn3)
+#         # 分支 stage 2：差分 + 卷积
+#         x_dyn3 = pairwise_temporal_diff(x_fused2)
+#         x_dyn3 = self.conv3(x_dyn3)
 
-        # 融合分支输出和主干 Layer3 输出，作为 Layer4 输入
-        x_fused3 = self.fuse3(layer3_block, x_dyn3)
+#         # 融合分支输出和主干 Layer3 输出，作为 Layer4 输入
+#         x_fused3 = self.fuse3(layer3_block, x_dyn3)
 
-        # 分支 stage 3：不差分，直接卷积
-        x_dyn4 = self.conv4(x_fused3)
+#         # 分支 stage 3：不差分，直接卷积
+#         x_dyn4 = self.conv4(x_fused3)
 
-        # 最终融合：与 Layer4 输出融合作为模型输出
-        x_fused4 = self.fuse4(layer4_block, x_dyn4)
+#         # 最终融合：与 Layer4 输出融合作为模型输出
+#         x_fused4 = self.fuse4(layer4_block, x_dyn4)
 
-        return x_fused4
+#         return x_fused4
 
 
 
@@ -994,3 +994,117 @@ class FeatureFusion(nn.Module):
             x2 = x2[:, :, :T1]
         x = torch.cat([x1, x2], dim=1)
         return self.relu(self.bn(self.fuse(x)))
+
+"""
+更轻量的融合模块：FusionModule
+"""
+class FusionModule(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv = nn.Conv3d(channels * 2, channels, kernel_size=1)
+
+    def forward(self, x1, x2):
+        # 自动裁剪时间维度 T 对齐
+        T1, T2 = x1.shape[2], x2.shape[2]
+        if T1 > T2:
+            x1 = x1[:, :, :T2]
+        elif T2 > T1:
+            x2 = x2[:, :, :T1]
+        
+        x = torch.cat([x1, x2], dim=1)
+#         print("x.shape:",x.shape)
+        return self.conv(x)
+
+"""
+新重构分支模块
+"""
+class ProgressiveFusionBranch(nn.Module):
+    def __init__(self, conv2, conv3, conv4, fuse2, fuse3, fuse4, layer3, layer4):
+        super().__init__()
+        self.conv2 = conv2
+        self.conv3 = conv3
+        self.conv4 = conv4
+        self.fuse2 = fuse2
+        self.fuse3 = fuse3
+        self.fuse4 = fuse4
+        self.layer3 = layer3
+        self.layer4 = layer4
+
+    def forward(self, x1, x2):
+        d2 = pairwise_temporal_diff(x1)
+        d2_out = self.conv2(d2)
+        fused2 = self.fuse2(d2_out, x2)
+
+        x3_main = self.layer3(fused2)
+        x2_diff = pairwise_temporal_diff(x2)
+        d2_out_diff = pairwise_temporal_diff(d2_out)
+#         print("x2_diff:",x2_diff.shape)
+#         print("d2_out_diff:",d2_out_diff.shape)
+        d3 = self.fuse2(pairwise_temporal_diff(x2), pairwise_temporal_diff(d2_out))
+        d3_out = self.conv3(d3)
+#         print("x3_main:",x3_main.shape)
+#         print("d3_out:",d3_out.shape)
+        x3_out = self.fuse3(x3_main, d3_out)
+
+        x4_main = self.layer4(x3_out)
+        d4 = torch.cat([pairwise_temporal_diff(x3_out), pairwise_temporal_diff(d3_out)], dim=2)
+        d4_out = self.conv4(d4)
+        x4_out = self.fuse4(x4_main, d4_out)
+
+        return fused2,x3_out,x4_out
+
+"""
+多尺度融合模块
+"""
+
+class MultiScaleTemporalFusion(nn.Module):
+    def __init__(self):
+        super(MultiScaleTemporalFusion, self).__init__()  # 修改为正确的类名
+        
+        # 用1x1卷积对齐通道数为512
+        self.e1_proj = nn.Sequential(
+            nn.Conv2d(128, 512, kernel_size=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True)
+        )
+        self.e2_proj = nn.Sequential(
+            nn.Conv2d(256, 512, kernel_size=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True)
+        )
+        self.x_dyn_proj = nn.Identity()  # x_dyn 已是512通道，无需投影
+
+        # 下采样e1的空间分辨率从(32, 22) -> (16, 11)
+        self.downsample_e1 = nn.AdaptiveAvgPool2d((16, 11))
+        self.fusion_conv = nn.Conv2d(
+            in_channels=512*3,   # 你拼接后的通道数
+            out_channels=512,    # 输出的目标通道数，通常回到原始通道数
+            kernel_size=1,
+            stride=1,
+            padding=0
+        )
+
+    def forward(self, e1, e2, x_dyn):
+        # squeeze temporal 维度，去掉第2维（size=1）
+        e1 = e1.squeeze(2)  # [B, 128, 32, 22]
+        e2 = e2.squeeze(2)  # [B, 256, 16, 11]
+        x_dyn = x_dyn.mean(2)  # [B, 512, 16, 11] -> 对时间维求均值
+
+        # 对通道维度进行对齐
+        e1 = self.e1_proj(e1)  # [B, 512, 32, 22]
+#         print(f"After e1 dtype: {e1.dtype}")  
+        e2 = self.e2_proj(e2)  # [B, 512, 16, 11]
+
+        # 将 e1 的空间维度对齐为(16, 11)，其余特征尺寸已经匹配
+        e1 = self.downsample_e1(e1)  # [B, 512, 16, 11]
+#         print(f"After downsample dtype: {e1.dtype}")  
+        # e2 和 x_dyn 本身已经是 [B, 512, 16, 11]，无需修改
+
+        # 特征融合：将三个特征在通道维度上拼接
+        fused_feat = torch.cat([e1, e2, x_dyn], dim=1)  # [B, 512*3, 16, 11]
+        # 使用 1x1 卷积将通道数从 1536 压缩到 512
+        conv_layer = nn.Conv2d(in_channels=1536, out_channels=512, kernel_size=1)
+        fused_feat = self.fusion_conv(fused_feat)  # [32, 512, 16, 11]
+#         print(f"After conv_layer dtype: {fused_feat.dtype}")  
+        fused_feat = fused_feat.unsqueeze(2)  # [32, 512, 1, 16, 11]
+        return fused_feat
