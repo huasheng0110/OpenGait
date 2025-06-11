@@ -3,7 +3,7 @@ from torch.nn import functional as F
 import torch.nn as nn
 from torchvision.models.resnet import BasicBlock, Bottleneck, ResNet
 from ..modules import BasicConv2d
-from ..modules import DynamicFeatureBranch, FeatureFusion,ProgressiveFusionBranch, FusionModule,MultiScaleTemporalFusion,PackSequenceWrapper
+from ..modules import DynamicFeatureBranch, FeatureFusion,ProgressiveFusionBranch, FusionModule,PyramidFusionBlock,PackSequenceWrapper
 from ..BasicBlock3D import BasicBlock3D
 from ..BasicBlockP3D import BasicBlockP3D
 
@@ -294,7 +294,7 @@ class ResNet9_P3D(nn.Module):
         
         
         self.avgpool = nn.AdaptiveAvgPool3d((1, 1, 1))
-        self.global_fusion = MultiScaleTemporalFusion()
+        self.global_fusion = PyramidFusionBlock(in_channels_e1=128, in_channels_e2=256, in_channels_xdyn=512)
 
         self.block2_conv = self.layer2[0].conv2d
         self.block3_conv = self.layer3[0].conv2d

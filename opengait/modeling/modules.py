@@ -891,14 +891,14 @@ class BasicBlock3D(nn.Module):
     用于时间卷积后与原图像的融合FeatureFusion
 """
 def pairwise_temporal_diff(x):
-    # x: [B, C, T, H, W]
     B, C, T, H, W = x.shape
+    if T < 2:
+        return x  # ❗ 若帧数太小就跳过差分
     if T % 2 != 0:
-        x = x[:, :, :-1, :, :]  # truncate last frame to make T even
-        T = T - 1
+        x = x[:, :, :-1, :, :]  # 剪掉最后一帧
     x1 = x[:, :, 0::2, :, :]
     x2 = x[:, :, 1::2, :, :]
-    return x2 - x1  # [B, C, T//2, H, W]
+    return x2 - x1
 
 
 class DynamicFeatureBranch(nn.Module):
@@ -1108,3 +1108,53 @@ class MultiScaleTemporalFusion(nn.Module):
 #         print(f"After conv_layer dtype: {fused_feat.dtype}")  
         fused_feat = fused_feat.unsqueeze(2)  # [32, 512, 1, 16, 11]
         return fused_feat
+
+    
+"""
+正金字塔融合思想
+"""
+class PyramidFusionBlock(nn.Module):
+    def __init__(self, in_channels_e1, in_channels_e2, in_channels_xdyn, out_channels=512,
+                 target_size=(16, 11)):
+        super(PyramidFusionBlock, self).__init__()
+        self.target_size = target_size
+
+        # 通道对齐
+        self.e1_proj = nn.Sequential(
+            nn.Conv2d(in_channels_e1, out_channels, kernel_size=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+        self.e2_proj = nn.Sequential(
+            nn.Conv2d(in_channels_e2, out_channels, kernel_size=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+        self.xdyn_proj = nn.Identity()  # 默认 x_dyn 已是 out_channels
+
+        # 空间尺寸对齐
+        self.downsample_e1 = nn.AdaptiveAvgPool2d(target_size)
+
+        # 融合卷积
+        self.fusion_conv = nn.Conv2d(out_channels * 3, out_channels, kernel_size=1)
+
+    def forward(self, e1, e2, x_dyn):
+        e1 = e1.squeeze(2)  # [B, C1, H1, W1]
+        e2 = e2.squeeze(2)  # [B, C2, H2, W2]
+        x_dyn = x_dyn.mean(2)  # [B, C3, H2, W2]
+
+        # 通道统一
+        e1 = self.e1_proj(e1)  # [B, out, 32, 22]
+        e2 = self.e2_proj(e2)  # [B, out, 16, 11]
+        x_dyn = self.xdyn_proj(x_dyn)  # [B, out, 16, 11]
+
+        # 尺寸对齐
+        e1 = self.downsample_e1(e1)  # [B, out, 16, 11]
+
+        # 正金字塔残差式融合
+        e2_fused = e2 + x_dyn  # 中层增强
+        x_dyn_fused = x_dyn + e2 + e1  # 高层增强
+
+        fused = torch.cat([e1, e2_fused, x_dyn_fused], dim=1)  # [B, out*3, 16, 11]
+        out = self.fusion_conv(fused)  # [B, out, 16, 11]
+        return out.unsqueeze(2)  # [B, out, 1, 16, 11]
