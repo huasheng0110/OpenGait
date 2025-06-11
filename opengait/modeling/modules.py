@@ -900,7 +900,6 @@ def pairwise_temporal_diff(x):
     x2 = x[:, :, 1::2, :, :]
     return x2 - x1
 
-
 class DynamicFeatureBranch(nn.Module):
     def __init__(self, conv2_block2, conv2_block3, conv2_block4):
         super().__init__()
@@ -909,53 +908,56 @@ class DynamicFeatureBranch(nn.Module):
         self.conv4 = conv2_block4
     def forward(self, x):  # x 是 layer1 输出
         
-#         print('x分支网络起始维度大小：',x.shape)
+        print('x分支网络起始维度大小：',x.shape)
         x = pairwise_temporal_diff(x)  # T -> T/2
 #         print('x的维度:',x.shape)
         x = self.conv2(x)
 
         x = pairwise_temporal_diff(x)  # T/2 -> T/4
+        print('经过第二次差分的维度：',x.shape)
         x = self.conv3(x)
 
         x = self.conv4(x)
 
         return x
+"""
 
-''' 重构分支模块 '''
-# class ProgressiveFusionBranch(nn.Module):
-#     def __init__(self, conv2, conv3, conv4, fuse2, fuse3, fuse4):
-#         super().__init__()
-#         self.conv2 = conv2
-#         self.conv3 = conv3
-#         self.conv4 = conv4
-#         self.fuse2 = fuse2
-#         self.fuse3 = fuse3
-#         self.fuse4 = fuse4
+重构分支为动态渐进式分支： ProgressiveFusionBranch
 
-#     def forward(self, x_stage1, layer2_block, layer3_block, layer4_block):
-#         # 分支 stage 1：差分 + 卷积
-#         x_dyn2 = pairwise_temporal_diff(x_stage1)
-#         x_dyn2 = self.conv2(x_dyn2)
+"""
 
-#         # 融合分支输出和主干 Layer2 输出，作为 Layer3 输入
-#         x_fused2 = self.fuse2(layer2_block, x_dyn2)
+class ProgressiveFusionBranch(nn.Module):
+    def __init__(self, conv2, conv3, conv4, fuse2, fuse3, fuse4):
+        super().__init__()
+        self.conv2 = conv2
+        self.conv3 = conv3
+        self.conv4 = conv4
+        self.fuse2 = fuse2
+        self.fuse3 = fuse3
+        self.fuse4 = fuse4
 
-#         # 分支 stage 2：差分 + 卷积
-#         x_dyn3 = pairwise_temporal_diff(x_fused2)
-#         x_dyn3 = self.conv3(x_dyn3)
+    def forward(self, x_stage1, layer2_block, layer3_block, layer4_block):
+        # 分支 stage 1：差分 + 卷积
+        x_dyn2 = pairwise_temporal_diff(x_stage1)
+        x_dyn2 = self.conv2(x_dyn2)
 
-#         # 融合分支输出和主干 Layer3 输出，作为 Layer4 输入
-#         x_fused3 = self.fuse3(layer3_block, x_dyn3)
+        # 融合分支输出和主干 Layer2 输出，作为 Layer3 输入
+        x_fused2 = self.fuse2(layer2_block, x_dyn2)
 
-#         # 分支 stage 3：不差分，直接卷积
-#         x_dyn4 = self.conv4(x_fused3)
+        # 分支 stage 2：差分 + 卷积
+        x_dyn3 = pairwise_temporal_diff(x_fused2)
+        x_dyn3 = self.conv3(x_dyn3)
 
-#         # 最终融合：与 Layer4 输出融合作为模型输出
-#         x_fused4 = self.fuse4(layer4_block, x_dyn4)
+        # 融合分支输出和主干 Layer3 输出，作为 Layer4 输入
+        x_fused3 = self.fuse3(layer3_block, x_dyn3)
 
-#         return x_fused4
+        # 分支 stage 3：不差分，直接卷积
+        x_dyn4 = self.conv4(x_fused3)
 
+        # 最终融合：与 Layer4 输出融合作为模型输出
+        x_fused4 = self.fuse4(layer4_block, x_dyn4)
 
+        return x_fused4
 
 # class FeatureFusion(nn.Module):
 #     def __init__(self, in_channels, out_channels):
@@ -978,6 +980,7 @@ class DynamicFeatureBranch(nn.Module):
 #         x = self.relu(self.bn(self.fuse(x)))
 # #         print('特征融合后的特征大小：',x.shape)
 #         return x
+
 
 class FeatureFusion(nn.Module):
     def __init__(self, in1, in2, out):
@@ -1109,6 +1112,65 @@ class MultiScaleTemporalFusion(nn.Module):
         fused_feat = fused_feat.unsqueeze(2)  # [32, 512, 1, 16, 11]
         return fused_feat
 
+    
+    
+"""
+辅助分支模块代码+FC映射
+"""
+
+# class SupervisedBranch(nn.Module):
+#     def __init__(self, in_channels, embedding_dim=256):
+#         super().__init__()
+#         self.gap = nn.AdaptiveAvgPool2d((1, 1))
+#         self.conv = nn.Conv2d(in_channels, embedding_dim, kernel_size=1)
+#         self.bn = nn.BatchNorm2d(embedding_dim)
+#         self.relu = nn.ReLU(inplace=True)
+
+#     def forward(self, x):
+#         x = self.gap(x)  # [n, c, 1, 1]
+#         x = self.conv(x)
+#         x = self.bn(x)
+#         x = self.relu(x)
+#         return x.view(x.size(0), -1)  # [n, embedding_dim]
+
+
+class SupervisedFCBranch(nn.Module):
+    def __init__(self, in_channels, embedding_dim=256):
+        super(SupervisedFCBranch, self).__init__()
+        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(in_channels, embedding_dim)
+        self.bn = nn.BatchNorm1d(embedding_dim)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        # x: [N, C, H, W]
+        x = self.global_pool(x)  # [N, C, 1, 1]
+        x = x.view(x.size(0), -1)  # [N, C]
+        x = self.fc(x)             # [N, out_channels]
+        x = self.bn(x)
+        x = self.relu(x)
+        return x
+
+
+    
+"""
+    e1+x_dyn 和e2+x_dyn 融合的辅助监督分支。由主干动态特征引导浅层、中层特征进行学习，类似蒸馏模型的感觉。
+"""
+class SupervisedFusionBranch(nn.Module):
+    def __init__(self, in_channels, embedding_dim=256):
+        super(SupervisedFusionBranch, self).__init__()
+        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(in_channels, embedding_dim)
+        self.bn = nn.BatchNorm1d(embedding_dim)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        x = self.global_pool(x).view(x.size(0), -1)
+        x = self.fc(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x.unsqueeze(-1)
+    
     
 """
 正金字塔融合思想
